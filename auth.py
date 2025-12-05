@@ -15,6 +15,7 @@ fake_users_db = {
 SECRET_KEY = "super-secret-key"
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
+REFRESH_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7 # 7 days
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
 
@@ -41,15 +42,36 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), response: Response =
     if not user or user["password"] != form_data.password:
         raise HTTPException(status_code=400, detail="Invalid credentials")
 
-    access_token = create_access_token({"sub": user["username"]})
-    # 同時回傳 token 並設定 cookie
+    # 建立 access token
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": user["username"]}, expires_delta=access_token_expires
+    )
+
+    # 建立 refresh token
+    refresh_token_expires = timedelta(minutes=REFRESH_TOKEN_EXPIRE_MINUTES)
+    refresh_token = create_access_token(
+        data={"sub": user["username"]}, expires_delta=refresh_token_expires
+    )
+
+    # 將 refresh token 存放在 HttpOnly cookie 中
     response.set_cookie(
-        key="jwt",
-        value=access_token,
+        key="refresh_token",
+        value=refresh_token,
         httponly=True,
-        samesite="lax"
+        samesite="lax",
+        max_age=REFRESH_TOKEN_EXPIRE_MINUTES * 60, # cookie 的過期時間（秒）
+        secure=False # 在本地開發設為 False，在生產環境應設為 True
     )
     return {"access_token": access_token, "token_type": "bearer"}
+
+@app.post("/refresh")
+def refresh_token(response: Response, refresh_token: Optional[str] = Cookie(None)):
+    if not refresh_token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing refresh token")
+    username = verify_token(refresh_token)
+    new_access_token = create_access_token(data={"sub": username})
+    return {"access_token": new_access_token, "token_type": "bearer"}
 
 @app.get("/protected")
 def protected(token: Optional[str] = Depends(oauth2_scheme), jwt_cookie: Optional[str] = Cookie(None)):
