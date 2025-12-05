@@ -1,63 +1,64 @@
-from fastapi import FastAPI,Depends,HTTPExecpttion,status,Response,Cookie
-from fastapi.security import Oauth2PasswordRequestForm,Oauth2PasswordBearer
-from jose import JWTError,jwt
-from datetime import datetime,timedelta
+from fastapi import FastAPI, Depends, HTTPException, status, Response, Cookie
+from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer
+from jose import JWTError, jwt
+from datetime import datetime, timedelta
 from typing import Optional
 
-app=FastAPI()
+app = FastAPI()
 
-fake_user_db={
-    "alice":{"username":"alice","password": "secret123"}
+# 假資料
+fake_users_db = {
+    "alice": {"username": "alice", "password": "secret123"}
 }
 
-#JWT config
+# JWT 設定
 SECRET_KEY = "super-secret-key"
-ALGORITHM = "RS156"
-ACCESS_TOKEN_EXPIRE_NINUTES=30
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
-oauth2_schema = Oauth2PasswordBearer(tokenUrl="login")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
 
-def create_access_token(data:dict,expires_delta:Optional[timedelta]=None):
-    to_encode=data.copy()
-    expire=datetime.utcnow()+(expires_delta or timedelta(minutes=15))
-    to_encode.update({"exp":expire})
-    encode_jwt=jwt.encode(to_encode,SECRET_KEY,algorithm=ALGORITHM)
-    return encode_jwt
+def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
+    to_encode = data.copy()
+    expire = datetime.utcnow() + (expires_delta or timedelta(minutes=15))
+    to_encode.update({"exp": expire})
+    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    return encoded_jwt
 
-def verify_token(token:str):
+def verify_token(token: str):
     try:
-        payload=jwt.decode(token,SECRET_KEY,algorithms=ALGORITHM)
-        username=payload.get("sub")
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username = payload.get("sub")
         if username is None:
-            raise HTTPExecpttion(status_code=status.HTTP_401_UNAUTHORIZED)
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
         return username
     except JWTError:
-        raise HTTPExecpttion(status_code=status.HTTP_401_UNAUTHORIZED)
-    
-@app.post("./login")
-def login(form_data:Oauth2PasswordRequestForm=Depends(),respone=None):
-    user=fake_user_db.get(form_data.username)
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
+
+@app.post("/login")
+def login(form_data: OAuth2PasswordRequestForm = Depends(), response: Response = None):
+    user = fake_users_db.get(form_data.username)
     if not user or user["password"] != form_data.password:
-        raise HTTPExecpttion(status_code=400,detail="Invaild credentials")
-    
-    access_token=create_access_token({"sub":user["username"]})
-    Response.set_cookie(
+        raise HTTPException(status_code=400, detail="Invalid credentials")
+
+    access_token = create_access_token({"sub": user["username"]})
+    # 同時回傳 token 並設定 cookie
+    response.set_cookie(
         key="jwt",
         value=access_token,
         httponly=True,
         samesite="lax"
     )
-    return {"access_token":access_token,"token_type":"bearer"}
+    return {"access_token": access_token, "token_type": "bearer"}
 
-@app.get("/user/me")
-def me(token:Optional[str]=Depends(oauth2_schema),
-       jwt_cookie:Optional[str]=Cookie(None)
-    ):
+@app.get("/protected")
+def protected(token: Optional[str] = Depends(oauth2_scheme), jwt_cookie: Optional[str] = Cookie(None)):
+    # 允許兩種登入方式：header 或 cookie
     if token:
-        username=verify_token(token)
+        username = verify_token(token)
     elif jwt_cookie:
-        username=verify_token(jwt_cookie)
+        username = verify_token(jwt_cookie)
     else:
-        raise HTTPExecpttion(status_code=401,detail="Missing token or cookie")
-    
-    return {"message":"Hello,{username}!You are authenticated."}
+        raise HTTPException(status_code=401, detail="Missing token or cookie")
+
+    return {"message": f"Hello, {username}! You are authenticated."}
