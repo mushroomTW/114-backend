@@ -1,6 +1,7 @@
 import os
 from datetime import datetime, timedelta
-from jose import jwt
+from jose import jwt,JWTError
+from fastapi import Depends,HTTPException,status
 from fastapi.security import OAuth2PasswordBearer
 
 SECRET_KEY = os.getenv("SECRET_KEY", "fallback-for-dev")
@@ -16,3 +17,25 @@ def create_access_token(data: dict):
 def get_current_user_email(token: str):
     # 解析 JWT 並回傳 email 的邏輯...
     pass
+
+def get_current_user_email(token: str=Depends(oauth2_scheme))-> str:
+    """
+    解析 JWT 並回傳使用者 email
+    - 用於受保護路由的依賴注入
+    - 
+    """
+    credential_exception=HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="無法驗證憑證",
+        headers={"WWW-Authenticate":"Bearer"}
+    )
+    try:
+        #解碼 JWT
+        payload=jwt.decode(token,SECRET_KEY,algorithms=[ALGORITHM])
+        #
+        email: str=payload.get("sub")
+        if email is None:
+            raise credential_exception
+        return email
+    except JWTError:
+        raise credential_exception
